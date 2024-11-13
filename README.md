@@ -47,4 +47,6 @@ GroundingDINO 模型是一个通用场景检测模型，用于确定光标、其
 ## 仓库文件设置
 所有上位机代码放在目录 UpperComputer 中，所有下位机代码放在 LowerComputer 中。
 
+## 开发进程
+50% (指建好文件夹了)
 
