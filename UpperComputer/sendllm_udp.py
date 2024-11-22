@@ -17,7 +17,7 @@ def main():
 
     while True:
         # 获取用户输入
-        #鼠标移动到左上方，每次移动 5 和 10，共计 20 次，然后键盘输入你好，Python!
+        #鼠标移动
         message = input("Enter message to send: ")
         if message.lower() == 'exit':
             break
