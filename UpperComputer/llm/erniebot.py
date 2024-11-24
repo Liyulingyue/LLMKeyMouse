@@ -23,51 +23,56 @@ class Ernie_TransChain:
 
     def construct_prompt(self, user_input: str) -> str:
         """
-        构建 Prompt
+        构建简化版 Prompt
         """
         prompt = f"""
-你是一个指令生成助手，请根据以下用户输入的自然语言，解析生成符合 JSON 格式的执行指令。
-每条指令需要包含以下字段：
-- "order"：指令的执行顺序，从 1 开始递增
-- "device"：设备名称，仅支持 "mouse" 和 "keyboard"
-- "operation"：设备的操作类型，"mouse" 支持 "move" 和 "click"，"keyboard" 支持 "write"
-- 其他字段：
-  - 如果设备为 "mouse"，需要提供 "x" 和 "y"（坐标移动值）以及 "steps"（移动次数）
-  - 如果设备为 "keyboard"，需要提供 "text"（输入的文本内容）
-为每条指令添加字段：
-- "err"：0 表示成功，-1 表示失败
-- "message"：指令生成的状态消息
-如果输入的指令不在支持范围内，请返回带有 "err": -1 和相应 "message" 的指令。
+    你是一个指令生成助手，请根据以下用户输入的自然语言，解析生成符合 JSON 格式的单步执行指令。
+    每条指令需要包含以下字段：
+    - "order"：指令的执行顺序，从 1 开始递增
+    - "device"：设备名称，仅支持 "mouse" 和 "keyboard"
+    - "operation"：设备的操作类型：
+      - 如果设备为 "mouse"，支持 "move" 和 "click"
+      - 如果设备为 "keyboard"，支持 "write"
+    - 其他字段：
+      - 如果操作为 "move"，需要提供：
+        - "direction"：移动方向，仅支持 "x" 或 "y"
+        - "steps"：移动的像素数量（正数为正向移动，负数为负向移动）
+      - 如果操作为 "write"，需要提供：
+        - "text"：要输入的文本内容
 
-用户输入：{user_input}
+    每条指令仅对应一个动作。如果需要多个动作，请分为多条独立的指令。
 
-### 示例输入：
-用户输入：鼠标移动到右下方，每次移动 10 和 5，共计 50 次，然后键盘输入 "Hello, CircuitPython!"
+    用户输入：{user_input}
 
-### 示例输出：
-[
-    {{
-        "order": 1,
-        "device": "mouse",
-        "operation": "move",
-        "x": 10,
-        "y": 5,
-        "steps": 50,
-        "err": 0,
-        "message": "成功转换指令"
-    }},
-    {{
-        "order": 2,
-        "device": "keyboard",
-        "operation": "write",
-        "text": "Hello, CircuitPython!",
-        "err": 0,
-        "message": "成功转换指令"
-    }}
-]
+    ### 示例输入：
+    用户输入：鼠标向右移动 100 像素，然后鼠标向下移动 50 像素，最后键盘输入 "Hello"
 
-请根据以下用户输入生成符合上述规则的 JSON 数据：
-"""
+    ### 示例输出：
+    [
+        {{
+            "order": 1,
+            "device": "mouse",
+            "operation": "move",
+            "direction": "x",
+            "steps": 100
+        }},
+        {{
+            "order": 2,
+            "device": "mouse",
+            "operation": "move",
+            "direction": "y",
+            "steps": 50
+        }},
+        {{
+            "order": 3,
+            "device": "keyboard",
+            "operation": "write",
+            "text": "Hello"
+        }}
+    ]
+
+    请根据以下用户输入生成符合上述规则的 JSON 数据：
+    """
         return prompt
 
     def validate_command(self, commands: list) -> list:
@@ -144,7 +149,69 @@ class Ernie_TransChain:
             LOG.error(f"提取 JSON 时出错: {e}")
             return [{"err": -1, "message": "提取 JSON 数据失败"}]
 
-    def run(self, user_input: str):
+    def commands_format(self, valid_commands: list) -> list:
+        """
+        提取合规指令中的键值，生成指定格式的字符串列表（每个最多 64 字符）。
+
+        格式：
+        - 第一个位置：设备数值（mouse=0, keyboard=1）
+        - 第二个位置：64（表示长度）
+        - 第三个位置：操作类型数值
+            - mouse: move=1, click=2
+            - keyboard: write=1
+        - 后续字段：
+            - 如果是 mouse 且操作为 move，拼接 "direction" 和 "steps"
+            - 如果是 mouse 且操作为 click，无需后续字段
+            - 如果是 keyboard 且操作为 write，拼接 "text"
+
+        :param valid_commands: 合规的 JSON 对象列表
+        :return: 包含多个最多 64 字符的字符串的列表
+        """
+        result = []
+
+        for item in valid_commands:
+            # 获取设备并映射为数值
+            device = item.get("device", "")
+            device_value = "0" if device == "mouse" else "1" if device == "keyboard" else "-1"  # -1 表示未知设备
+
+            # 固定长度标志
+            length_flag = "64"
+
+            # 获取操作类型
+            operation = item.get("operation", "")
+            if device == "mouse":
+                operation_value = "1" if operation == "move" else "2" if operation == "click" else "-1"
+            elif device == "keyboard":
+                operation_value = "1" if operation == "write" else "-1"
+            else:
+                operation_value = "-1"  # 未知操作
+
+            # 按设备和操作类型拼接指令
+            if device == "mouse" and operation == "move":
+                # mouse 的 move 需要 direction 和 steps
+                direction = item.get("direction", "unknown")  # 默认值为 unknown
+                steps = str(item.get("steps", 0))  # 默认步数为 0
+                formatted_str = f"{device_value}{length_flag}{operation_value}{direction}{steps}"
+
+            elif device == "mouse" and operation == "click":
+                # mouse 的 click 不需要额外字段
+                formatted_str = f"{device_value}{length_flag}{operation_value}"
+
+            elif device == "keyboard" and operation == "write":
+                # keyboard 的 write 需要 text
+                text = item.get("text", "")  # 默认文本为空
+                formatted_str = f"{device_value}{length_flag}{operation_value}{text}"
+
+            else:
+                # 未知设备或操作，返回错误字符串
+                formatted_str = f"{device_value}{length_flag}-1"
+
+            # 截断64 字符
+            result.append(formatted_str[:64])
+
+        return result
+
+    def json_run(self, user_input: str):
         """
         主执行逻辑：构建 Prompt，调用 LLM，提取 JSON，校验指令。
         """
@@ -156,7 +223,7 @@ class Ernie_TransChain:
             # 获取 JSON 数据
             commands = self.get_llm_json_answer(prompt)
 
-            # 校验指令合规
+            # 把json转换成
             validated_commands = self.validate_command(commands)
 
             # 转换 commands 为commands_str
@@ -174,3 +241,39 @@ class Ernie_TransChain:
             error_message = f"执行过程中发生错误: {str(e)}"
             LOG.error(error_message)
             return [{"err": -1, "message": error_message}], False
+
+    def run(self, user_input: str):
+        """
+        主执行逻辑：构建 Prompt，调用 LLM，提取 JSON，校验指令，并返回格式化的字符串列表。
+        """
+        try:
+            # 构建 Prompt
+            prompt = self.construct_prompt(user_input)
+            LOG.debug(f"构建的 Prompt 为：{prompt}")
+
+            # 获取 JSON 数据
+            commands = self.get_llm_json_answer(prompt)
+
+            # 校验指令合规
+            validated_commands = self.validate_command(commands)
+
+            # 检查是否有至少一个成功指令
+            valid_commands = [cmd for cmd in validated_commands if cmd.get("err") == 0]
+            if not valid_commands:
+                # 如果没有合规指令，直接返回错误
+                error_message = "错误：没有合规的指令，无法执行后续操作"
+                LOG.error(error_message)
+                return error_message, False
+
+            # 提取键值并生成字符串列表
+            formatted_strings = self.commands_format(valid_commands)
+
+            # 返回字符串列表和成功状态
+            return formatted_strings, True
+
+        except Exception as e:
+            # 捕获所有其他异常，记录日志并返回
+            error_message = f"执行过程中发生错误: {str(e)}"
+            LOG.error(error_message)
+            return [{"err": -1, "message": error_message}], False
+
