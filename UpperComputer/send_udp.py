@@ -1,7 +1,7 @@
 import socket
 
 def main():
-    server_ip = '192.168.1.12'
+    server_ip = '192.168.2.244'
     server_port = 5000
 
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
